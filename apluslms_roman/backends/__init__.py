@@ -1,8 +1,11 @@
+import logging
 from collections import namedtuple
 from collections.abc import Mapping
+from pathlib import PurePosixPath
 
 from ..observer import BuildObserver
 
+logger = logging.getLogger(__name__)
 
 BACKENDS = {
     'docker': 'apluslms_roman.backends.docker.DockerBackend',
@@ -112,3 +115,18 @@ class Backend:
 
     def version_info(self):
         pass
+
+    def get_host_path(self, original):
+        mapping = self.environment.environ.get('directory_map', {})
+        if not mapping:
+            return original
+        logger.debug("Get mapping from environment:%s", mapping)
+        path = PurePosixPath(original)
+        for container, host in mapping.items():
+            try:
+                logger.debug("Mapping:%s:%s", container, host)
+                return str(PurePosixPath(host, path.relative_to(container)))
+            except ValueError:
+                logger.error("Error when composing new path!")
+                continue
+        return ValueError("Unable to map path '%s' to any backend host path" % (path))

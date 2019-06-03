@@ -9,6 +9,7 @@ from .observer import StreamObserver
 from .utils.importing import import_string
 from .utils.translation import _
 
+
 class Builder:
     def __init__(self, engine, config, observer=None):
         if not isdir(config.dir):
@@ -21,7 +22,7 @@ class Builder:
 
     def get_steps(self, refs: list = None):
         steps = [BuildStep.from_config(i, step)
-            for i, step in enumerate(self.config.steps)]
+                 for i, step in enumerate(self.config.steps)]
         if refs:
             name_dict = {step.name: step for step in steps}
             refs = [int(ref) if ref.isdigit() else ref.lower() for ref in refs]
@@ -64,11 +65,9 @@ class Engine:
 
         name = getattr(backend_class, 'name', None) or backend_class.__name__.lower()
         env_prefix = name.upper() + '_'
-        env = {k: v for k, v in environ.items() if k.startswith(env_prefix)}
+        env = {key: value for key, value in environ.items() if key.startswith(env_prefix)}
         if settings:
-            for k, v in settings.get(name, {}).items():
-                if v is not None and v != '':
-                    env[env_prefix + k.replace('-', '_').upper()] = v
+            env.update(settings.get(name, {}))
         self._environment = Environment(getuid(), getegid(), env)
 
     @cached_property

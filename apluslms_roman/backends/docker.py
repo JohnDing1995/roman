@@ -1,6 +1,7 @@
-import docker
-from os.path import join
+import logging
+from os.path import join, expanduser
 
+import docker
 from apluslms_yamlidator.utils.decorator import cached_property
 
 from ..utils.translation import _
@@ -12,6 +13,8 @@ from . import (
 
 Mount = docker.types.Mount
 
+logger = logging.getLogger(__name__)
+
 
 class DockerBackend(Backend):
     name = 'docker'
@@ -22,14 +25,28 @@ You might be able to add yourself to that group with 'sudo adduser docker'.""")
     @cached_property
     def _client(self):
         env = self.environment.environ
-        kwargs = {}
-        version = env.get('DOCKER_VERSION', None)
-        if version:
-            kwargs['version'] = version
-        timeout = env.get('DOCKER_TIMEOUT', None)
-        if timeout:
-            kwargs['timeout'] = timeout
-        return docker.from_env(environment=env, **kwargs)
+        params = {
+            'base_url': env.get('host'),
+            'version': env.get('version'),
+        }
+        if 'timeout' in env:
+            params['timeout'] = env['timeout']
+
+        # false values: 0, false, '', unset
+        # true values: 1, true, "yes"
+        tls_verify = bool(env.get('tls_verify', False))
+        cert_path = env.get('cert_path') or None
+        if tls_verify or cert_path:
+            if not cert_path:
+                cert_path = join(expanduser('~'), '.docker')
+            params['tls'] = docker.tls.TLSConfig(
+                client_cert=(join(cert_path, 'cert.pem'), join(cert_path, 'key.pem')),
+                ca_cert=join(cert_path, 'ca.pem'),
+                verify=tls_verify,
+                ssl_version=env.get('tls_ssl_version'),
+                assert_hostname=tls_verify and env.get('tls_assert_hostname'),
+            )
+        return docker.DockerClient(**params)
 
     def _run_opts(self, task, step):
         env = self.environment
@@ -41,16 +58,19 @@ You might be able to add yourself to that group with 'sudo adduser docker'.""")
             user='{}:{}'.format(env.uid, env.gid),
         )
 
+        path = self.get_host_path(task.path)
+
+        logger.debug("Final path is:%s", path)
         # mounts and workdir
         if step.mnt:
-            opts['mounts'] = [Mount(step.mnt, task.path, type='bind', read_only=False)]
+            opts['mounts'] = [Mount(step.mnt, path, type='bind', read_only=False)]
             opts['working_dir'] = step.mnt
         else:
             wpath = self.WORK_PATH
             opts['mounts'] = [
                 Mount(wpath, None, type='tmpfs', read_only=False, tmpfs_size=self.WORK_SIZE),
-                Mount(join(wpath, 'src'), task.path, type='bind', read_only=True),
-                Mount(join(wpath, 'build'), join(task.path, '_build'), type='bind', read_only=False),
+                Mount(join(wpath, 'src'), path, type='bind', read_only=True),
+                Mount(join(wpath, 'build'), join(path, '_build'), type='bind', read_only=False),
             ]
             opts['working_dir'] = wpath
 
